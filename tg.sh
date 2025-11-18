@@ -1,7 +1,7 @@
 #!/bin/bash
-# MTProto 一键安装脚本 (带推广标签功能)
+# MTProto 一键安装脚本
 # Author: HgTrojan
-# 优化内容：增强TAG格式验证、新增独立修改功能、完善标签传递逻辑
+# Telegram推广TAG: #MTProto代理 #Telegram加速 #TG代理教程 #无限制上网
 
 RED="\033[31m"      # 错误信息
 GREEN="\033[32m"    # 成功信息
@@ -15,18 +15,20 @@ CHECK="✔"
 CROSS="✗"
 INFO="ℹ"
 
+# 核心配置（替换为你的实际信息）
+TG_CHANNEL="https://t.me/your_channel"  # 你的Telegram推广频道
+# Telegram推广TAG（可按需增减，用空格分隔）
+TG_TAGS="#MTProto代理 #Telegram加速 #TG代理教程 #无限制上网 #代理一键安装 #跨境网络工具"
+
 export MTG_CONFIG="${MTG_CONFIG:-$HOME/.config/mtg}"
 export MTG_ENV="$MTG_CONFIG/env"
 export MTG_SECRET="$MTG_CONFIG/secret"
 export MTG_CONTAINER="${MTG_CONTAINER:-mtg}"
 export MTG_IMAGENAME="${MTG_IMAGENAME:-nineseconds/mtg}"
 
-# 推广标签变量
-export MTG_PROXY_TAG=""  # 默认空标签
-
 DOCKER_CMD="$(command -v docker)"
 OSNAME=$(hostnamectl | grep -i system | cut -d: -f2)
-IP=$(curl -sL -4 ip.sb || curl -sL -4 icanhazip.com)  # 增加IP获取备用源
+IP=$(curl -sL -4 ip.sb)
 
 colorEcho() {
     echo -e "${1}${@:2}${PLAIN}"
@@ -98,25 +100,9 @@ statusText() {
     esac
 }
 
-# 新增：标签格式验证函数（Telegram要求32位十六进制）
-validateTag() {
-    local tag=$1
-    # 空标签直接通过（允许不设置标签）
-    if [[ -z "$tag" ]]; then
-        return 0
-    fi
-    # 验证32位十六进制（0-9, a-f, A-F）
-    if [[ "$tag" =~ ^[0-9a-fA-F]{32}$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
 getData() {
     mkdir -p $MTG_CONFIG
 
-    # 端口验证
     while true; do
         read -p " 请输入 MTProto 端口 [100-65535]: " PORT
         if [[ "$PORT" =~ ^[0-9]+$ ]] && [[ "$PORT" -ge 100 ]] && [[ "$PORT" -le 65535 ]]; then
@@ -126,68 +112,13 @@ getData() {
         fi
     done
 
-    # 域名设置
     read -p " 请输入 TLS 伪装域名 (默认: cloudflare.com): " DOMAIN
     DOMAIN=${DOMAIN:-cloudflare.com}
 
-    # 标签设置（带格式验证）
-    while true; do
-        if [[ -z "$MTG_PROXY_TAG" ]]; then
-            read -p " 请输入推广标签（32位十六进制，留空不设置）: " MTG_PROXY_TAG
-        fi
-        if validateTag "$MTG_PROXY_TAG"; then
-            # 转换为小写（Telegram标签不区分大小写，统一格式）
-            MTG_PROXY_TAG=$(echo "$MTG_PROXY_TAG" | tr 'A-Z' 'a-z')
-            break
-        else
-            colorEcho $RED " ${CROSS} 标签格式错误！必须是32位十六进制字符（0-9, a-f）"
-            MTG_PROXY_TAG=""  # 重置错误输入
-        fi
-    done
-
-    # 保存配置
     echo "MTG_IMAGENAME=$MTG_IMAGENAME" > "$MTG_ENV"
     echo "MTG_PORT=$PORT" >> "$MTG_ENV"
     echo "MTG_CONTAINER=$MTG_CONTAINER" >> "$MTG_ENV"
     echo "MTG_DOMAIN=$DOMAIN" >> "$MTG_ENV"
-    echo "MTG_PROXY_TAG=$MTG_PROXY_TAG" >> "$MTG_ENV"
-}
-
-# 新增：独立修改标签功能
-modifyTag() {
-    if [[ ! -f "$MTG_ENV" ]]; then
-        colorEcho $RED " ${CROSS} 未检测到配置文件，请先安装代理"
-        return
-    fi
-
-    # 读取当前标签
-    current_tag=$(grep "MTG_PROXY_TAG=" "$MTG_ENV" | cut -d= -f2)
-    colorEcho $BLUE " ${INFO} 当前推广标签: ${current_tag:-未设置}"
-
-    # 输入新标签并验证
-    MTG_PROXY_TAG=""  # 清空临时变量
-    while true; do
-        read -p " 请输入新的推广标签（32位十六进制，留空清除）: " MTG_PROXY_TAG
-        if validateTag "$MTG_PROXY_TAG"; then
-            MTG_PROXY_TAG=$(echo "$MTG_PROXY_TAG" | tr 'A-Z' 'a-z')  # 统一小写
-            break
-        else
-            colorEcho $RED " ${CROSS} 标签格式错误！必须是32位十六进制字符（0-9, a-f）"
-        fi
-    done
-
-    # 更新配置文件
-    sed -i "s/^MTG_PROXY_TAG=.*/MTG_PROXY_TAG=$MTG_PROXY_TAG/" "$MTG_ENV"
-    colorEcho $GREEN " ${CHECK} 推广标签已更新为: $MTG_PROXY_TAG"
-
-    # 重启服务生效
-    colorEcho $BLUE " ${INFO} 正在重启服务应用新标签..."
-    docker restart "$MTG_CONTAINER" >/dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
-        colorEcho $GREEN " ${CHECK} 服务重启成功"
-    else
-        colorEcho $YELLOW " ${INFO} 服务重启失败，尝试手动启动"
-    fi
 }
 
 installDocker() {
@@ -264,22 +195,13 @@ start() {
         fi
     fi
 
-    # 启动命令优化：明确传递标签（如果存在）
     docker rm -f "$MTG_CONTAINER" >/dev/null 2>&1
-    run_cmd="docker run -d \
+    if ! docker run -d \
         --name "$MTG_CONTAINER" \
         --restart unless-stopped \
         --ulimit nofile=51200:51200 \
         -p "0.0.0.0:$MTG_PORT:3128" \
-        "$MTG_IMAGENAME" run "
-
-    # 如果有标签，添加到启动参数（nineseconds/mtg支持--tag参数）
-    if [[ -n "$MTG_PROXY_TAG" ]]; then
-        run_cmd+="--tag $MTG_PROXY_TAG "
-    fi
-    run_cmd+="$(cat "$MTG_SECRET")"
-
-    if ! eval $run_cmd >/dev/null; then
+        "$MTG_IMAGENAME" run "$(cat "$MTG_SECRET")" >/dev/null; then
         colorEcho $RED " ${CROSS} 服务启动失败"
         exit 1
     fi
@@ -297,13 +219,7 @@ start() {
 generateSubscriptionLink() {
     set -a; source "$MTG_ENV"; set +a
     SECRET=$(cat "$MTG_SECRET" 2>/dev/null) || SECRET="未生成"
-    
-    # 标签参数拼接优化（确保格式正确）
-    if [[ -n "$MTG_PROXY_TAG" ]]; then
-        SUBSCRIPTION_LINK="https://t.me/proxy?server=$IP&port=$MTG_PORT&secret=$SECRET&tag=$MTG_PROXY_TAG"
-    else
-        SUBSCRIPTION_LINK="https://t.me/proxy?server=$IP&port=$MTG_PORT&secret=$SECRET"
-    fi
+    SUBSCRIPTION_LINK="https://t.me/proxy?server=$IP&port=$MTG_PORT&secret=$SECRET"
     echo "$SUBSCRIPTION_LINK"
 }
 
@@ -334,10 +250,15 @@ showInfo() {
     echo -e " ${BLUE}● 代理端口:${PLAIN} ${GREEN}$MTG_PORT${PLAIN}"
     echo -e " ${BLUE}● TLS 域名:${PLAIN} ${GREEN}$MTG_DOMAIN${PLAIN}"
     echo -e " ${BLUE}● 安全密钥:${PLAIN} ${GREEN}$SECRET${PLAIN}"
-    echo -e " ${BLUE}● 推广标签:${PLAIN} ${GREEN}${MTG_PROXY_TAG:-未设置}${PLAIN}"
-    echo -e " ${BLUE}● 标签格式:${PLAIN} 32位十六进制（0-9, a-f）"  # 新增格式提示
     echo -e " ${BLUE}● 订阅链接:${PLAIN} ${GREEN}$SUBSCRIPTION_LINK${PLAIN}"
     generateQRCode
+    
+    # 重点添加：Telegram推广TAG + 频道引导
+    echo -e "\n${YELLOW}★ Telegram推广TAG（可直接复制分享）:${PLAIN}"
+    echo -e " ${GREEN}$TG_TAGS${PLAIN}"
+    echo -e "\n${YELLOW}★ 关注频道获取更多资源:${PLAIN}"
+    echo -e " ${GREEN}→ 官方频道: $TG_CHANNEL${PLAIN}"
+    echo -e " ${YELLOW}→ 分享代理时带上TAG，引流效果更佳！${PLAIN}"
     echo -e "${PURPLE}===============================================${PLAIN}\n"
 }
 
@@ -358,30 +279,12 @@ install() {
     showInfo
 }
 
-# 解析命令行参数 (-P 用于设置推广标签)
-parse_args() {
-    while getopts "P:" opt; do
-        case $opt in
-            P) 
-                # 命令行参数标签验证
-                if validateTag "$OPTARG"; then
-                    MTG_PROXY_TAG=$(echo "$OPTARG" | tr 'A-Z' 'a-z')  # 统一小写
-                else
-                    colorEcho $RED " ${CROSS} 标签格式错误！必须是32位十六进制字符（0-9, a-f）"
-                    exit 1
-                fi
-                ;;
-            \?) colorEcho $RED " ${CROSS} 无效参数: -$OPTARG" >&2; exit 1 ;;
-            :) colorEcho $RED " ${CROSS} 参数 -$OPTARG 需要值" >&2; exit 1 ;;
-        esac
-    done
-}
-
 menu() {
     clear
     echo -e "${PURPLE}#===============================================#"
     echo -e "#              ${GREEN}MTProto 代理管理脚本${PLAIN}             #"
-    echo -e "#         ${YELLOW}支持推广标签 (Set received)${PLAIN}          #"
+    echo -e "#                 ${YELLOW}作者: HgTrojan${PLAIN}                 #"
+    echo -e "#        ${BLUE}TG推广TAG: #MTProto代理 #Telegram加速${PLAIN}      #"
     echo -e "#===============================================#${PLAIN}"
     echo -e "  ${GREEN}1.${PLAIN} 安装代理"
     echo -e "  ${GREEN}2.${PLAIN} 更新代理"
@@ -394,22 +297,16 @@ menu() {
     echo -e "  ${GREEN}7.${PLAIN} 查看信息"
     echo -e "  ${GREEN}8.${PLAIN} 修改配置"
     echo -e "  ${GREEN}9.${PLAIN} 查看日志"
-    echo -e "  ${GREEN}10.${PLAIN} 修改推广标签（单独）"  # 新增独立修改选项
     echo -e "  ${BLUE}-----------------------------${PLAIN}"
     echo -e "  ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "\n 当前状态: $(statusText)"
-    # 显示当前标签
-    if [[ -n "$MTG_PROXY_TAG" ]]; then
-        echo -e " 当前推广标签: ${GREEN}$MTG_PROXY_TAG${PLAIN}"
-    fi
 }
 
 checkSystem
-parse_args "$@"  # 解析命令行参数
 
 while true; do
     menu
-    read -p " 请输入操作编号 [0-10]: " choice
+    read -p " 请输入操作编号 [0-9]: " choice
     case $choice in
         1) install ;;
         2) docker pull $MTG_IMAGENAME && start ;;
@@ -420,7 +317,6 @@ while true; do
         7) showInfo ;;
         8) getData && start ;;
         9) docker logs $MTG_CONTAINER -n 20 ;;
-        10) modifyTag ;;  # 新增独立修改标签的处理逻辑
         0) exit 0 ;;
         *) colorEcho $RED " ${CROSS} 无效选择" ;;
     esac
