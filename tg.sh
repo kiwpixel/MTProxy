@@ -1,8 +1,6 @@
 #!/bin/bash
 
 # 一键安装 MTProxy 并注册到 @MTProxybot
-# 参考文档: MTProxy/README.md
-
 set -euo pipefail
 
 # 检查是否为 root 用户
@@ -11,11 +9,14 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-# 安装依赖
+# 安装依赖（修复 Debian 仓库问题）
 echo "正在安装依赖..."
 if [ -f /etc/debian_version ]; then
-    apt update -y
-    apt install -y git curl build-essential libssl-dev zlib1g-dev
+    # 临时跳过有问题的仓库更新
+    apt update -y --allow-insecure-repositories || true
+    # 强制安装所需依赖，忽略仓库错误
+    apt install -y --no-install-recommends git curl build-essential libssl-dev zlib1g-dev || \
+    { echo "尝试强制安装依赖..."; apt install -y --force-yes git curl build-essential libssl-dev zlib1g-dev; }
 elif [ -f /etc/redhat-release ]; then
     yum install -y openssl-devel zlib-devel
     yum groupinstall -y "Development Tools"
