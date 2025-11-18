@@ -1,7 +1,7 @@
 #!/bin/bash
-# MTProto 一键安装脚本 (带推广标签功能)
+# MTProto 一键安装脚本 (基础加密版)
 # Author: HgTrojan
-# 新增功能：支持 -P 参数设置推广标签 (Set received 标签)
+# 特性：简化加密，不使用TLS伪装，保留推广标签功能
 
 RED="\033[31m"      # 错误信息
 GREEN="\033[32m"    # 成功信息
@@ -21,11 +21,10 @@ export MTG_SECRET="$MTG_CONFIG/secret"
 export MTG_CONTAINER="${MTG_CONTAINER:-mtg}"
 export MTG_IMAGENAME="${MTG_IMAGENAME:-nineseconds/mtg}"
 
-# 新增：推广标签变量
-export MTG_PROXY_TAG=""  # 默认空标签
+# 推广标签变量
+export MTG_PROXY_TAG=""
 
 DOCKER_CMD="$(command -v docker)"
-OSNAME=$(hostnamectl | grep -i system | cut -d: -f2)
 IP=$(curl -sL -4 ip.sb)
 
 colorEcho() {
@@ -54,12 +53,10 @@ checkSystem() {
         fi
         PMT="apt"
         CMD_INSTALL="apt install -y "
-        CMD_REMOVE="apt remove -y "
     else
         OS="centos"
         PMT="yum"
         CMD_INSTALL="yum install -y "
-        CMD_REMOVE="yum remove -y "
     fi
     res=$(which systemctl)
     if [[ "$?" != "0" ]]; then
@@ -110,10 +107,7 @@ getData() {
         fi
     done
 
-    read -p " 请输入 TLS 伪装域名 (默认: cloudflare.com): " DOMAIN
-    DOMAIN=${DOMAIN:-cloudflare.com}
-
-    # 新增：如果未通过命令行参数设置标签，则询问用户
+    # 移除TLS域名配置，简化加密
     if [[ -z "$MTG_PROXY_TAG" ]]; then
         read -p " 请输入推广标签 (留空则不设置): " MTG_PROXY_TAG
     fi
@@ -121,8 +115,7 @@ getData() {
     echo "MTG_IMAGENAME=$MTG_IMAGENAME" > "$MTG_ENV"
     echo "MTG_PORT=$PORT" >> "$MTG_ENV"
     echo "MTG_CONTAINER=$MTG_CONTAINER" >> "$MTG_ENV"
-    echo "MTG_DOMAIN=$DOMAIN" >> "$MTG_ENV"
-    echo "MTG_PROXY_TAG=$MTG_PROXY_TAG" >> "$MTG_ENV"  # 保存标签到环境变量
+    echo "MTG_PROXY_TAG=$MTG_PROXY_TAG" >> "$MTG_ENV"
 }
 
 installDocker() {
@@ -191,9 +184,10 @@ start() {
 
     set -a; source "$MTG_ENV"; set +a
 
+    # 生成基础加密密钥（不使用TLS）
     if [[ ! -f "$MTG_SECRET" ]]; then
-        colorEcho $BLUE " ${INFO} 正在生成安全密钥..."
-        if ! docker run --rm "$MTG_IMAGENAME" generate-secret tls -c "$MTG_DOMAIN" > "$MTG_SECRET"; then
+        colorEcho $BLUE " ${INFO} 正在生成基础加密密钥..."
+        if ! docker run --rm "$MTG_IMAGENAME" generate-secret > "$MTG_SECRET"; then
             colorEcho $RED " ${CROSS} 密钥生成失败"
             exit 1
         fi
@@ -224,7 +218,7 @@ generateSubscriptionLink() {
     set -a; source "$MTG_ENV"; set +a
     SECRET=$(cat "$MTG_SECRET" 2>/dev/null) || SECRET="未生成"
     
-    # 新增：如果有推广标签，添加到链接中（Telegram支持的Set received标签格式）
+    # 推广标签整合
     if [[ -n "$MTG_PROXY_TAG" ]]; then
         SUBSCRIPTION_LINK="https://t.me/proxy?server=$IP&port=$MTG_PORT&secret=$SECRET&tag=$MTG_PROXY_TAG"
     else
@@ -240,7 +234,7 @@ generateQRCode() {
         qrencode -t ANSIUTF8 "$SUBSCRIPTION_LINK"
     else
         colorEcho $YELLOW " ${INFO} 未安装 qrencode，无法生成二维码。"
-        colorEcho $YELLOW " 请运行以下命令安装 qrencode："
+        colorEcho $YELLOW " 请运行以下命令安装："
         if [[ $OS == "ubuntu" || $OS == "debian" ]]; then
             echo "sudo apt install -y qrencode"
         elif [[ $OS == "centos" ]]; then
@@ -258,16 +252,15 @@ showInfo() {
     echo -e " ${BLUE}● 当前状态:${PLAIN} $(statusText)"
     echo -e " ${BLUE}● 服务器IP:${PLAIN} ${GREEN}$IP${PLAIN}"
     echo -e " ${BLUE}● 代理端口:${PLAIN} ${GREEN}$MTG_PORT${PLAIN}"
-    echo -e " ${BLUE}● TLS 域名:${PLAIN} ${GREEN}$MTG_DOMAIN${PLAIN}"
     echo -e " ${BLUE}● 安全密钥:${PLAIN} ${GREEN}$SECRET${PLAIN}"
-    echo -e " ${BLUE}● 推广标签:${PLAIN} ${GREEN}${MTG_PROXY_TAG:-未设置}${PLAIN}"  # 显示标签
+    echo -e " ${BLUE}● 推广标签:${PLAIN} ${GREEN}${MTG_PROXY_TAG:-未设置}${PLAIN}"
     echo -e " ${BLUE}● 订阅链接:${PLAIN} ${GREEN}$SUBSCRIPTION_LINK${PLAIN}"
     generateQRCode
     echo -e "${PURPLE}===============================================${PLAIN}\n"
 }
 
 optimizeGFW() {
-    colorEcho $BLUE " ${INFO} 正在优化抗封锁配置..."
+    colorEcho $BLUE " ${INFO} 正在优化网络配置..."
     sysctl -w net.core.rmem_max=16777216
     sysctl -w net.core.wmem_max=16777216
     sysctl -p >/dev/null
@@ -283,7 +276,6 @@ install() {
     showInfo
 }
 
-# 新增：解析命令行参数 (-P 用于设置推广标签)
 parse_args() {
     while getopts "P:" opt; do
         case $opt in
@@ -297,7 +289,7 @@ parse_args() {
 menu() {
     clear
     echo -e "${PURPLE}#===============================================#"
-    echo -e "#              ${GREEN}MTProto 代理管理脚本${PLAIN}             #"
+    echo -e "#           ${GREEN}MTProto 代理管理脚本 (基础加密)${PLAIN}       #"
     echo -e "#         ${YELLOW}支持推广标签 (Set received)${PLAIN}          #"
     echo -e "#===============================================#${PLAIN}"
     echo -e "  ${GREEN}1.${PLAIN} 安装代理"
@@ -314,14 +306,13 @@ menu() {
     echo -e "  ${BLUE}-----------------------------${PLAIN}"
     echo -e "  ${GREEN}0.${PLAIN} 退出脚本"
     echo -e "\n 当前状态: $(statusText)"
-    # 新增：显示当前设置的推广标签
     if [[ -n "$MTG_PROXY_TAG" ]]; then
         echo -e " 当前推广标签: ${GREEN}$MTG_PROXY_TAG${PLAIN}"
     fi
 }
 
 checkSystem
-parse_args "$@"  # 解析命令行参数
+parse_args "$@"
 
 while true; do
     menu
