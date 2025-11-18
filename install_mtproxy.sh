@@ -11,6 +11,24 @@ PORT=443
 LOCAL_STATS_PORT=8888
 WORKERS=1
 RUN_USER="nobody"
+NONINTERACTIVE=0
+TAG=""
+
+show_help() {
+        cat <<EOF
+用法: sudo ./install_mtproxy.sh [OPTIONS]
+
+选项:
+    --port PORT           设置代理端口（默认: ${PORT})
+    --workers N           设置工作进程数（默认: ${WORKERS})
+    --user USER           指定运行用户（默认: ${RUN_USER})
+    --tag TAG             指定 MTProxy 的 TAG 值（可选）
+    --non-interactive     非交互模式：不询问 TAG，使用 --tag 或默认空
+    --repo URL            指定 MTProxy 仓库地址
+    --proxy-dir DIR       指定克隆目录
+    -h, --help            显示此帮助并退出
+EOF
+}
 
 # 彩色输出函数
 info() { echo -e "\033[1;34m[*] $*\033[0m"; }
@@ -22,6 +40,30 @@ ensure_root() {
         error "请以 root 或 sudo 权限运行此脚本"
     fi
 }
+
+# 参数解析（简单实现）
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --port)
+            PORT="$2"; shift 2;;
+        --workers)
+            WORKERS="$2"; shift 2;;
+        --user)
+            RUN_USER="$2"; shift 2;;
+        --tag)
+            TAG="$2"; shift 2;;
+        --non-interactive)
+            NONINTERACTIVE=1; shift;;
+        --repo)
+            REPO_URL="$2"; shift 2;;
+        --proxy-dir)
+            PROXY_DIR="$2"; shift 2;;
+        -h|--help)
+            show_help; exit 0;;
+        *)
+            error "未知参数: $1";;
+    esac
+done
 
 install_dependencies() {
     info "安装依赖包..."
@@ -64,6 +106,8 @@ generate_secret() {
         SECRET=$(head -c 16 /dev/urandom | xxd -ps)
     fi
     success "生成的连接密钥：$SECRET"
+    # 保存到文件，便于后续参考
+    echo "$SECRET" > .mtproxy_secret || true
 }
 
 build_proxy() {
@@ -80,8 +124,11 @@ start_proxy() {
         error "找不到可执行文件：$PROXY_DIR/objs/bin/mtproto-proxy，编译可能失败"
     fi
 
-    # 提示用户可选的 TAG
-    read -r -p "请输入从 @MTProxybot 获取的 TAG（如无则留空）： " TAG
+    if [ "$NONINTERACTIVE" -ne 1 ]; then
+        read -r -p "请输入从 @MTProxybot 获取的 TAG（如无则留空）： " input_tag
+        # 如果命令行已提供 TAG 则不覆盖
+        [ -z "$TAG" ] && TAG="$input_tag"
+    fi
 
     CMD=("$PROXY_DIR/objs/bin/mtproto-proxy"
          "-u" "$RUN_USER"
@@ -103,6 +150,28 @@ start_proxy() {
     else
         error "启动失败，请查看 $(pwd)/mtproxy.log"
     fi
+
+    # 生成连接字符串（尝试获取公网 IP）
+    PUBLIC_IP=""
+    if command -v curl &>/dev/null; then
+        PUBLIC_IP=$(curl -s https://ifconfig.me || true)
+    fi
+    if [ -z "$PUBLIC_IP" ]; then
+        # 尝试本机局域网地址作为回退
+        PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    [ -z "$PUBLIC_IP" ] && PUBLIC_IP="<SERVER_IP>"
+
+    # Telegram 使用的连接格式
+    TG_LINK="tg://proxy?server=${PUBLIC_IP}&port=${PORT}&secret=${SECRET}"
+    HTTPS_LINK="https://t.me/proxy?server=${PUBLIC_IP}&port=${PORT}&secret=${SECRET}"
+
+    echo
+    success "连接信息："
+    echo "- 原始 secret: $SECRET"
+    echo "- tg:// 链接: $TG_LINK"
+    echo "- https 链接: $HTTPS_LINK"
+    echo
 }
 
 main() {
