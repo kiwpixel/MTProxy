@@ -1,0 +1,21 @@
+[Unit]
+Description=MTProto Proxy (mtproto-proxy)
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/workspaces/MTProxy
+ExecStart=/workspaces/MTProxy/MTProxy/objs/bin/mtproto-proxy -u nobody -p 8888 -H 443 -S REPLACE_SECRET --aes-pwd /workspaces/MTProxy/MTProxy/proxy-secret /workspaces/MTProxy/MTProxy/proxy-multi.conf -M 1
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+
+# 使用方法：
+# 1. 编辑本文件，替换 REPLACE_SECRET 为实际 secret，并根据需要调整路径/端口/用户
+# 2. 复制到 /etc/systemd/system/mtproxy.service
+# 3. 执行： sudo systemctl daemon-reload
+# 4. 启动并开机自启： sudo systemctl enable --now mtproxy.service
